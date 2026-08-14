@@ -19,6 +19,21 @@ we list them in alphabetical order):
 - Website design and development
 - Writing technical documentation
 
+We understand that everyone has a different level of experience,
+also NumPy is a pretty well-established project, so it's hard to
+make assumptions about an ideal "first-time-contributor". 
+So, that's why we don't mark issues with the "good-first-issue"
+label. Instead, you'll find `issues labeled "Sprintable" <https://github.com/numpy/numpy/labels/sprintable>`__.
+These issues can either be:
+
+- **Easily fixed** when you have guidance from an experienced
+  contributor (perfect for working in a sprint).
+- **A learning opportunity** for those ready to dive deeper,
+  even if you're not in a sprint. 
+
+Additionally, depending on your prior experience, some "Sprintable"
+issues might be easy, while others could be more challenging for you.
+
 The rest of this document discusses working on the NumPy code base and documentation.
 We're in the process of updating our descriptions of other activities and roles.
 If you are interested in these other activities, please contact us!
@@ -91,6 +106,10 @@ Here's the short summary, complete TOC links are below:
    * Go to GitHub. The new branch will show up with a green Pull Request
      button. Make sure the title and message are clear, concise, and self-
      explanatory. Then click the button to submit it.
+
+   * Note that non-maintainers may only have one non-draft pull request
+     open for review at a time. See :ref:`pull-request-limit` for details
+     and how to be allowed more open pull requests.
 
    * If your commit introduces a new feature or changes functionality, post on
      the `mailing list`_ to explain your changes. For bug fixes, documentation
@@ -168,6 +187,8 @@ Guidelines
 * No changes are ever committed without review and approval by a core
   team member. Please ask politely on the PR or on the `mailing list`_ if you
   get no response to your pull request within a week.
+* Do not include copyright notices in source code without explicitly discussing the need first. 
+  In general, any code you contribute to the project is under the project `license <https://numpy.org/devdocs/license.html>`_.
 
 .. _stylistic-guidelines:
 
@@ -175,8 +196,8 @@ Stylistic guidelines
 --------------------
 
 * Set up your editor to follow `PEP 8 <https://www.python.org/dev/peps/
-  pep-0008/>`_ (remove trailing white space, no tabs, etc.).  Check code with
-  pyflakes / flake8.
+  pep-0008/>`_ (remove trailing white space, no tabs, etc.).  Check code
+  with ruff.
 
 * Use NumPy data types instead of strings (``np.uint8`` instead of
   ``"uint8"``).
@@ -237,10 +258,13 @@ The rest of the story
 .. toctree::
    :maxdepth: 2
 
+   ai_policy
    development_environment
+   spin
    howto_build_docs
    development_workflow
    development_advanced_debugging
+   development_ghcodespaces
    reviewer_guidelines
    ../benchmarking
    NumPy C style guide <https://numpy.org/neps/nep-0045-c_style_guide.html>

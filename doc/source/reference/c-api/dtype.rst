@@ -1,3 +1,5 @@
+
+
 Data type API
 =============
 
@@ -500,3 +502,4 @@ format specifier in printf and related commands.
 .. c:macro:: NPY_UINTP_FMT
 
 .. c:macro:: NPY_LONGDOUBLE_FMT
+  

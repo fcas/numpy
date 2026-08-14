@@ -55,19 +55,6 @@ find_previous_utf8_character(const unsigned char *c, size_t nchar)
     return c;
 }
 
-NPY_NO_EXPORT int
-num_bytes_for_utf8_character(const unsigned char *c) {
-    if (c[0] <= 0x7F) {
-        return 1;
-    }
-    else if (c[0] <= 0xDF) {
-        return 2;
-    }
-    else if (c[0] <= 0xEF) {
-        return 3;
-    }
-    return 4;
-}
 
 NPY_NO_EXPORT int
 num_utf8_bytes_for_codepoint(uint32_t code)
@@ -264,7 +251,9 @@ utf8_buffer_size(const uint8_t *s, size_t max_bytes)
 
 
 // calculate the number of UTF-32 code points in the UTF-8 encoded string
-// stored in **s**, which is **max_bytes** long.
+// stored in **s**, which is **max_bytes** long. Unlike the fixed-width
+// conversion helpers above, this is length-explicit and does not trim trailing
+// null bytes.
 NPY_NO_EXPORT int
 num_codepoints_for_utf8_bytes(const unsigned char *s, size_t *num_codepoints, size_t max_bytes)
 {
@@ -272,11 +261,6 @@ num_codepoints_for_utf8_bytes(const unsigned char *s, size_t *num_codepoints, si
     uint32_t state = 0;
     size_t num_bytes = 0;
     *num_codepoints = 0;
-
-    // ignore trailing nulls
-    while (max_bytes > 0 && s[max_bytes - 1] == 0) {
-        max_bytes--;
-    }
 
     if (max_bytes == 0) {
         return UTF8_ACCEPT;

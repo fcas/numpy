@@ -26,6 +26,8 @@
 #include "stringdtype/dtype.h"
 #include "stringdtype/utf8_utils.h"
 
+#include <vector>
+
 #define LOAD_TWO_INPUT_STRINGS(CONTEXT)                                            \
         const npy_packed_static_string *ps1 = (npy_packed_static_string *)in1;     \
         npy_static_string s1 = {0, NULL};                                          \
@@ -135,9 +137,9 @@ static int multiply_loop_core(
         size_t newsize;
         int overflowed = npy_mul_with_overflow_size_t(
                 &newsize, cursize, factor);
-        if (overflowed) {
-            npy_gil_error(PyExc_MemoryError,
-                      "Failed to allocate string in string multiply");
+        if (overflowed || newsize > PY_SSIZE_T_MAX) {
+            npy_gil_error(PyExc_OverflowError,
+                      "Overflow encountered in string multiply");
             goto fail;
         }
 
@@ -238,19 +240,17 @@ static int multiply_left_strided_loop(
 }
 
 static NPY_CASTING
-binary_resolve_descriptors(struct PyArrayMethodObject_tag *NPY_UNUSED(method),
+binary_resolve_descriptors(struct PyArrayMethodObject_tag *method,
                            PyArray_DTypeMeta *const NPY_UNUSED(dtypes[]),
                            PyArray_Descr *const given_descrs[],
                            PyArray_Descr *loop_descrs[],
                            npy_intp *NPY_UNUSED(view_offset))
 {
-    PyArray_StringDTypeObject *descr1 = (PyArray_StringDTypeObject *)given_descrs[0];
-    PyArray_StringDTypeObject *descr2 = (PyArray_StringDTypeObject *)given_descrs[1];
-    int out_coerce = descr1->coerce && descr1->coerce;
     PyObject *out_na_object = NULL;
+    int out_coerce = 1;
 
-    if (stringdtype_compatible_na(
-                descr1->na_object, descr2->na_object, &out_na_object) == -1) {
+    if (stringdtype_common_na_coerce(method->nin, given_descrs,
+                                     &out_na_object, &out_coerce) == -1) {
         return (NPY_CASTING)-1;
     }
 
@@ -287,10 +287,12 @@ add_strided_loop(PyArrayMethod_Context *context, char *const data[],
     PyArray_StringDTypeObject *s1descr = (PyArray_StringDTypeObject *)context->descriptors[0];
     PyArray_StringDTypeObject *s2descr = (PyArray_StringDTypeObject *)context->descriptors[1];
     PyArray_StringDTypeObject *odescr = (PyArray_StringDTypeObject *)context->descriptors[2];
-    int has_null = s1descr->na_object != NULL;
-    int has_nan_na = s1descr->has_nan_na;
-    int has_string_na = s1descr->has_string_na;
-    const npy_static_string *default_string = &s1descr->default_string;
+    PyArray_StringDTypeObject *nadescr = stringdtype_effective_na_descr(
+            context->method->nin, context->descriptors);
+    int has_null = nadescr->na_object != NULL;
+    int has_nan_na = nadescr->has_nan_na;
+    int has_string_na = nadescr->has_string_na;
+    const npy_static_string *default_string = &nadescr->default_string;
     npy_intp N = dimensions[0];
     char *in1 = data[0];
     char *in2 = data[1];
@@ -466,11 +468,12 @@ string_comparison_strided_loop(PyArrayMethod_Context *context, char *const data[
     npy_bool res_for_gt = ((npy_bool *)context->method->static_data)[2];
     npy_bool res_for_ne = !res_for_eq;
     npy_bool eq_or_ne = res_for_lt == res_for_gt;
-    PyArray_StringDTypeObject *descr1 = (PyArray_StringDTypeObject *)context->descriptors[0];
-    int has_null = descr1->na_object != NULL;
-    int has_nan_na = descr1->has_nan_na;
-    int has_string_na = descr1->has_string_na;
-    const npy_static_string *default_string = &descr1->default_string;
+    PyArray_StringDTypeObject *nadescr = stringdtype_effective_na_descr(
+            context->method->nin, context->descriptors);
+    int has_null = nadescr->na_object != NULL;
+    int has_nan_na = nadescr->has_nan_na;
+    int has_string_na = nadescr->has_string_na;
+    const npy_static_string *default_string = &nadescr->default_string;
     npy_intp N = dimensions[0];
     char *in1 = data[0];
     char *in2 = data[1];
@@ -547,15 +550,13 @@ fail:
 
 static NPY_CASTING
 string_comparison_resolve_descriptors(
-        struct PyArrayMethodObject_tag *NPY_UNUSED(method),
+        struct PyArrayMethodObject_tag *method,
         PyArray_DTypeMeta *const NPY_UNUSED(dtypes[]),
         PyArray_Descr *const given_descrs[],
         PyArray_Descr *loop_descrs[], npy_intp *NPY_UNUSED(view_offset))
 {
-    PyArray_StringDTypeObject *descr1 = (PyArray_StringDTypeObject *)given_descrs[0];
-    PyArray_StringDTypeObject *descr2 = (PyArray_StringDTypeObject *)given_descrs[1];
-
-    if (stringdtype_compatible_na(descr1->na_object, descr2->na_object, NULL) == -1) {
+    if (stringdtype_common_na_coerce(
+                method->nin, given_descrs, NULL, NULL) == -1) {
         return (NPY_CASTING)-1;
     }
 
@@ -777,16 +778,14 @@ string_findlike_promoter(PyObject *NPY_UNUSED(ufunc),
 
 static NPY_CASTING
 string_findlike_resolve_descriptors(
-        struct PyArrayMethodObject_tag *NPY_UNUSED(method),
+        struct PyArrayMethodObject_tag *method,
         PyArray_DTypeMeta *const NPY_UNUSED(dtypes[]),
         PyArray_Descr *const given_descrs[],
         PyArray_Descr *loop_descrs[],
         npy_intp *NPY_UNUSED(view_offset))
 {
-    PyArray_StringDTypeObject *descr1 = (PyArray_StringDTypeObject *)given_descrs[0];
-    PyArray_StringDTypeObject *descr2 = (PyArray_StringDTypeObject *)given_descrs[1];
-
-    if (stringdtype_compatible_na(descr1->na_object, descr2->na_object, NULL) == -1) {
+    if (stringdtype_common_na_coerce(
+                method->nin, given_descrs, NULL, NULL) == -1) {
         return (NPY_CASTING)-1;
     }
 
@@ -826,16 +825,14 @@ string_startswith_endswith_promoter(
 
 static NPY_CASTING
 string_startswith_endswith_resolve_descriptors(
-        struct PyArrayMethodObject_tag *NPY_UNUSED(method),
+        struct PyArrayMethodObject_tag *method,
         PyArray_DTypeMeta *const NPY_UNUSED(dtypes[]),
         PyArray_Descr *const given_descrs[],
         PyArray_Descr *loop_descrs[],
         npy_intp *NPY_UNUSED(view_offset))
 {
-    PyArray_StringDTypeObject *descr1 = (PyArray_StringDTypeObject *)given_descrs[0];
-    PyArray_StringDTypeObject *descr2 = (PyArray_StringDTypeObject *)given_descrs[1];
-
-    if (stringdtype_compatible_na(descr1->na_object, descr2->na_object, NULL) == -1) {
+    if (stringdtype_common_na_coerce(
+                method->nin, given_descrs, NULL, NULL) == -1) {
         return (NPY_CASTING)-1;
     }
 
@@ -870,11 +867,12 @@ string_findlike_strided_loop(PyArrayMethod_Context *context,
 {
     const char *ufunc_name = ((PyUFuncObject *)context->caller)->name;
     find_like_function *function = *(find_like_function *)(context->method->static_data);
-    PyArray_StringDTypeObject *descr1 = (PyArray_StringDTypeObject *)context->descriptors[0];
+    PyArray_StringDTypeObject *nadescr = stringdtype_effective_na_descr(
+            context->method->nin, context->descriptors);
 
-    int has_null = descr1->na_object != NULL;
-    int has_string_na = descr1->has_string_na;
-    const npy_static_string *default_string = &descr1->default_string;
+    int has_null = nadescr->na_object != NULL;
+    int has_string_na = nadescr->has_string_na;
+    const npy_static_string *default_string = &nadescr->default_string;
 
     npy_string_allocator *allocators[2] = {};
     NpyString_acquire_allocators(2, context->descriptors, allocators);
@@ -946,12 +944,13 @@ string_startswith_endswith_strided_loop(PyArrayMethod_Context *context,
 {
     const char *ufunc_name = ((PyUFuncObject *)context->caller)->name;
     STARTPOSITION startposition = *(STARTPOSITION *)context->method->static_data;
-    PyArray_StringDTypeObject *descr1 = (PyArray_StringDTypeObject *)context->descriptors[0];
+    PyArray_StringDTypeObject *nadescr = stringdtype_effective_na_descr(
+            context->method->nin, context->descriptors);
 
-    int has_null = descr1->na_object != NULL;
-    int has_string_na = descr1->has_string_na;
-    int has_nan_na = descr1->has_nan_na;
-    const npy_static_string *default_string = &descr1->default_string;
+    int has_null = nadescr->na_object != NULL;
+    int has_string_na = nadescr->has_string_na;
+    int has_nan_na = nadescr->has_nan_na;
+    const npy_static_string *default_string = &nadescr->default_string;
 
     npy_string_allocator *allocators[2] = {};
     NpyString_acquire_allocators(2, context->descriptors, allocators);
@@ -1028,6 +1027,25 @@ all_strings_promoter(PyObject *NPY_UNUSED(ufunc),
                      PyArray_DTypeMeta *const signature[],
                      PyArray_DTypeMeta *new_op_dtypes[])
 {
+    if ((op_dtypes[0] != &PyArray_StringDType &&
+         op_dtypes[1] != &PyArray_StringDType &&
+         op_dtypes[2] != &PyArray_StringDType)) {
+        /*
+         * This promoter was triggered with only unicode arguments, so use
+         * unicode.  This can happen due to `dtype=` support which sets the
+         * output DType/signature.
+         */
+        new_op_dtypes[0] = NPY_DT_NewRef(&PyArray_UnicodeDType);
+        new_op_dtypes[1] = NPY_DT_NewRef(&PyArray_UnicodeDType);
+        new_op_dtypes[2] = NPY_DT_NewRef(&PyArray_UnicodeDType);
+        return 0;
+    }
+    if ((signature[0] == &PyArray_UnicodeDType &&
+         signature[1] == &PyArray_UnicodeDType &&
+         signature[2] == &PyArray_UnicodeDType)) {
+        /* Unicode forced, but didn't override a string input: invalid */
+        return -1;
+    }
     new_op_dtypes[0] = NPY_DT_NewRef(&PyArray_StringDType);
     new_op_dtypes[1] = NPY_DT_NewRef(&PyArray_StringDType);
     new_op_dtypes[2] = NPY_DT_NewRef(&PyArray_StringDType);
@@ -1043,12 +1061,13 @@ string_lrstrip_chars_strided_loop(
 {
     const char *ufunc_name = ((PyUFuncObject *)context->caller)->name;
     STRIPTYPE striptype = *(STRIPTYPE *)context->method->static_data;
-    PyArray_StringDTypeObject *s1descr = (PyArray_StringDTypeObject *)context->descriptors[0];
-    int has_null = s1descr->na_object != NULL;
-    int has_string_na = s1descr->has_string_na;
-    int has_nan_na = s1descr->has_nan_na;
+    PyArray_StringDTypeObject *nadescr = stringdtype_effective_na_descr(
+            context->method->nin, context->descriptors);
+    int has_null = nadescr->na_object != NULL;
+    int has_string_na = nadescr->has_string_na;
+    int has_nan_na = nadescr->has_nan_na;
 
-    const npy_static_string *default_string = &s1descr->default_string;
+    const npy_static_string *default_string = &nadescr->default_string;
     npy_intp N = dimensions[0];
     char *in1 = data[0];
     char *in2 = data[1];
@@ -1098,6 +1117,11 @@ string_lrstrip_chars_strided_loop(
         }
         {
             char *new_buf = (char *)PyMem_RawCalloc(s1.size, 1);
+            if (new_buf == NULL) {
+                npy_gil_error(PyExc_MemoryError,
+                              "Failed to allocate string in %s", ufunc_name);
+                goto fail;
+            }
             Buffer<ENCODING::UTF8> buf1((char *)s1.buf, s1.size);
             Buffer<ENCODING::UTF8> buf2((char *)s2.buf, s2.size);
             Buffer<ENCODING::UTF8> outbuf(new_buf, s1.size);
@@ -1220,6 +1244,11 @@ string_lrstrip_whitespace_strided_loop(
         }
         {
             char *new_buf = (char *)PyMem_RawCalloc(s.size, 1);
+            if (new_buf == NULL) {
+                npy_gil_error(PyExc_MemoryError,
+                              "Failed to allocate string in %s", ufunc_name);
+                goto fail;
+            }
             Buffer<ENCODING::UTF8> buf((char *)s.buf, s.size);
             Buffer<ENCODING::UTF8> outbuf(new_buf, s.size);
             size_t new_buf_size = string_lrstrip_whitespace(
@@ -1228,6 +1257,7 @@ string_lrstrip_whitespace_strided_loop(
             if (NpyString_pack(oallocator, ops, new_buf, new_buf_size) < 0) {
                 npy_gil_error(PyExc_MemoryError, "Failed to pack string in %s",
                               ufunc_name);
+                PyMem_RawFree(new_buf);
                 goto fail;
             }
 
@@ -1266,25 +1296,17 @@ string_replace_promoter(PyObject *NPY_UNUSED(ufunc),
 }
 
 static NPY_CASTING
-replace_resolve_descriptors(struct PyArrayMethodObject_tag *NPY_UNUSED(method),
+replace_resolve_descriptors(struct PyArrayMethodObject_tag *method,
                             PyArray_DTypeMeta *const NPY_UNUSED(dtypes[]),
                             PyArray_Descr *const given_descrs[],
                             PyArray_Descr *loop_descrs[],
                             npy_intp *NPY_UNUSED(view_offset))
 {
-    PyArray_StringDTypeObject *descr1 = (PyArray_StringDTypeObject *)given_descrs[0];
-    PyArray_StringDTypeObject *descr2 = (PyArray_StringDTypeObject *)given_descrs[1];
-    PyArray_StringDTypeObject *descr3 = (PyArray_StringDTypeObject *)given_descrs[2];
-    int out_coerce = descr1->coerce && descr2->coerce && descr3->coerce;
     PyObject *out_na_object = NULL;
+    int out_coerce = 1;
 
-    if (stringdtype_compatible_na(
-                descr1->na_object, descr2->na_object, &out_na_object) == -1) {
-        return (NPY_CASTING)-1;
-    }
-
-    if (stringdtype_compatible_na(
-                out_na_object, descr3->na_object, &out_na_object) == -1) {
+    if (stringdtype_common_na_coerce(method->nin, given_descrs,
+                                     &out_na_object, &out_coerce) == -1) {
         return (NPY_CASTING)-1;
     }
 
@@ -1332,12 +1354,12 @@ string_replace_strided_loop(
 
     npy_intp N = dimensions[0];
 
-    PyArray_StringDTypeObject *descr0 =
-            (PyArray_StringDTypeObject *)context->descriptors[0];
-    int has_null = descr0->na_object != NULL;
-    int has_string_na = descr0->has_string_na;
-    int has_nan_na = descr0->has_nan_na;
-    const npy_static_string *default_string = &descr0->default_string;
+    PyArray_StringDTypeObject *nadescr = stringdtype_effective_na_descr(
+            context->method->nin, context->descriptors);
+    int has_null = nadescr->na_object != NULL;
+    int has_string_na = nadescr->has_string_na;
+    int has_nan_na = nadescr->has_nan_na;
+    const npy_static_string *default_string = &nadescr->default_string;
 
 
     npy_string_allocator *allocators[5] = {};
@@ -1423,18 +1445,30 @@ string_replace_strided_loop(
             Buffer<ENCODING::UTF8> buf3((char *)i3s.buf, i3s.size);
 
             // conservatively overallocate
-            // TODO check overflow
-            size_t max_size;
+            size_t num_repl, growth;
             if (i2s.size == 0) {
                 // interleaving
-                max_size = i1s.size + (i1s.size + 1)*(i3s.size);
+                num_repl = (size_t)i1s.size + 1;
+                growth = i3s.size;
             }
             else {
                 // replace i2 with i3
-                size_t change = i2s.size >= i3s.size ? 0 : i3s.size - i2s.size;
-                max_size = i1s.size + count * change;
+                num_repl = (size_t)count;
+                growth = i2s.size >= i3s.size ? 0 : i3s.size - i2s.size;
             }
-            char *new_buf = (char *)PyMem_RawCalloc(max_size, 1);
+            char *new_buf = NULL;
+            size_t max_size;
+            if (!npy_mul_with_overflow_size_t(&max_size, num_repl, growth)) {
+                max_size += i1s.size;
+                if (max_size >= i1s.size) {
+                    new_buf = (char *)PyMem_RawCalloc(max_size, 1);
+                }
+            }
+            if (new_buf == NULL) {
+                npy_gil_error(PyExc_MemoryError,
+                              "Failed to allocate string in replace");
+                goto fail;
+            }
             Buffer<ENCODING::UTF8> outbuf(new_buf, max_size);
 
             size_t new_buf_size = string_replace(
@@ -1442,6 +1476,7 @@ string_replace_strided_loop(
 
             if (NpyString_pack(oallocator, ops, new_buf, new_buf_size) < 0) {
                 npy_gil_error(PyExc_MemoryError, "Failed to pack string in replace");
+                PyMem_RawFree(new_buf);
                 goto fail;
             }
 
@@ -1554,6 +1589,11 @@ string_expandtabs_strided_loop(PyArrayMethod_Context *context,
         }
 
         char *new_buf = (char *)PyMem_RawCalloc(new_buf_size, 1);
+        if (new_buf == NULL) {
+            npy_gil_error(PyExc_MemoryError,
+                          "Failed to allocate string in expandtabs");
+            goto fail;
+        }
         Buffer<ENCODING::UTF8> outbuf(new_buf, new_buf_size);
 
         string_expandtabs(buf, tabsize, outbuf);
@@ -1561,6 +1601,7 @@ string_expandtabs_strided_loop(PyArrayMethod_Context *context,
         if (NpyString_pack(oallocator, ops, new_buf, new_buf_size) < 0) {
             npy_gil_error(
                     PyExc_MemoryError, "Failed to pack string in expandtabs");
+            PyMem_RawFree(new_buf);
             goto fail;
         }
 
@@ -1579,19 +1620,31 @@ string_expandtabs_strided_loop(PyArrayMethod_Context *context,
     return -1;
 }
 
+static int
+string_center_ljust_rjust_promoter(
+        PyObject *NPY_UNUSED(ufunc),
+        PyArray_DTypeMeta *const op_dtypes[],
+        PyArray_DTypeMeta *const signature[],
+        PyArray_DTypeMeta *new_op_dtypes[])
+{
+    new_op_dtypes[0] = NPY_DT_NewRef(&PyArray_StringDType);
+    new_op_dtypes[1] = NPY_DT_NewRef(&PyArray_Int64DType);
+    new_op_dtypes[2] = NPY_DT_NewRef(&PyArray_StringDType);
+    new_op_dtypes[3] = NPY_DT_NewRef(&PyArray_StringDType);
+    return 0;
+}
+
 static NPY_CASTING
 center_ljust_rjust_resolve_descriptors(
-        struct PyArrayMethodObject_tag *NPY_UNUSED(method),
+        struct PyArrayMethodObject_tag *method,
         PyArray_DTypeMeta *const dtypes[], PyArray_Descr *const given_descrs[],
         PyArray_Descr *loop_descrs[], npy_intp *NPY_UNUSED(view_offset))
 {
-    PyArray_StringDTypeObject *input_descr = (PyArray_StringDTypeObject *)given_descrs[0];
-    PyArray_StringDTypeObject *fill_descr = (PyArray_StringDTypeObject *)given_descrs[2];
-    int out_coerce = input_descr->coerce && fill_descr->coerce;
     PyObject *out_na_object = NULL;
+    int out_coerce = 1;
 
-    if (stringdtype_compatible_na(
-                input_descr->na_object, fill_descr->na_object, &out_na_object) == -1) {
+    if (stringdtype_common_na_coerce(method->nin, given_descrs,
+                                     &out_na_object, &out_coerce) == -1) {
         return (NPY_CASTING)-1;
     }
 
@@ -1630,11 +1683,12 @@ center_ljust_rjust_strided_loop(PyArrayMethod_Context *context,
                                 npy_intp const strides[],
                                 NpyAuxData *NPY_UNUSED(auxdata))
 {
-    PyArray_StringDTypeObject *s1descr = (PyArray_StringDTypeObject *)context->descriptors[0];
-    int has_null = s1descr->na_object != NULL;
-    int has_nan_na = s1descr->has_nan_na;
-    int has_string_na = s1descr->has_string_na;
-    const npy_static_string *default_string = &s1descr->default_string;
+    PyArray_StringDTypeObject *nadescr = stringdtype_effective_na_descr(
+            context->method->nin, context->descriptors);
+    int has_null = nadescr->na_object != NULL;
+    int has_nan_na = nadescr->has_nan_na;
+    int has_string_na = nadescr->has_string_na;
+    const npy_static_string *default_string = &nadescr->default_string;
     npy_intp N = dimensions[0];
     char *in1 = data[0];
     char *in2 = data[1];
@@ -1701,7 +1755,7 @@ center_ljust_rjust_strided_loop(PyArrayMethod_Context *context,
             size_t num_codepoints = inbuf.num_codepoints();
             npy_intp width = (npy_intp)*(npy_int64*)in2;
 
-            if (num_codepoints > (size_t)width) {
+            if ((npy_intp)num_codepoints > width) {
                 width = num_codepoints;
             }
 
@@ -1713,9 +1767,9 @@ center_ljust_rjust_strided_loop(PyArrayMethod_Context *context,
                     width - num_codepoints);
             newsize += s1.size;
 
-            if (overflowed) {
-                npy_gil_error(PyExc_MemoryError,
-                              "Failed to allocate string in %s", ufunc_name);
+            if (overflowed || newsize > PY_SSIZE_T_MAX) {
+                npy_gil_error(PyExc_OverflowError,
+                              "Overflow encountered in %s", ufunc_name);
                 goto fail;
             }
 
@@ -1831,8 +1885,8 @@ zfill_strided_loop(PyArrayMethod_Context *context,
         {
             Buffer<ENCODING::UTF8> inbuf((char *)is.buf, is.size);
             size_t in_codepoints = inbuf.num_codepoints();
-            size_t width = (size_t)*(npy_int64 *)in2;
-            if (in_codepoints > width) {
+            npy_intp width = (npy_intp)*(npy_int64*)in2;
+            if ((npy_intp)in_codepoints > width) {
                 width = in_codepoints;
             }
             // number of leading one-byte characters plus the size of the
@@ -1893,9 +1947,9 @@ fail:
 static NPY_CASTING
 string_partition_resolve_descriptors(
         PyArrayMethodObject *self,
-        PyArray_DTypeMeta *const NPY_UNUSED(dtypes[3]),
-        PyArray_Descr *const given_descrs[3],
-        PyArray_Descr *loop_descrs[3],
+        PyArray_DTypeMeta *const NPY_UNUSED(dtypes[5]),
+        PyArray_Descr *const given_descrs[5],
+        PyArray_Descr *loop_descrs[5],
         npy_intp *NPY_UNUSED(view_offset))
 {
     if (given_descrs[2] || given_descrs[3] || given_descrs[4]) {
@@ -1904,13 +1958,11 @@ string_partition_resolve_descriptors(
         return (NPY_CASTING)-1;
     }
 
-    PyArray_StringDTypeObject *descr1 = (PyArray_StringDTypeObject *)given_descrs[0];
-    PyArray_StringDTypeObject *descr2 = (PyArray_StringDTypeObject *)given_descrs[1];
-    int out_coerce = descr1->coerce && descr2->coerce;
     PyObject *out_na_object = NULL;
+    int out_coerce = 1;
 
-    if (stringdtype_compatible_na(
-                descr1->na_object, descr2->na_object, &out_na_object) == -1) {
+    if (stringdtype_common_na_coerce(self->nin, given_descrs,
+                                     &out_na_object, &out_coerce) == -1) {
         return (NPY_CASTING)-1;
     }
 
@@ -1964,10 +2016,10 @@ string_partition_strided_loop(
     npy_string_allocator *out2allocator = allocators[3];
     npy_string_allocator *out3allocator = allocators[4];
 
-    PyArray_StringDTypeObject *idescr =
-            (PyArray_StringDTypeObject *)context->descriptors[0];
-    int has_string_na = idescr->has_string_na;
-    const npy_static_string *default_string = &idescr->default_string;
+    PyArray_StringDTypeObject *nadescr = stringdtype_effective_na_descr(
+            context->method->nin, context->descriptors);
+    int has_string_na = nadescr->has_string_na;
+    const npy_static_string *default_string = &nadescr->default_string;
 
     while (N--) {
         const npy_packed_static_string *i1ps = (npy_packed_static_string *)in1;
@@ -2110,6 +2162,179 @@ string_inputs_promoter(
 }
 
 static int
+slice_promoter(PyObject *NPY_UNUSED(ufunc),
+        PyArray_DTypeMeta *const op_dtypes[], PyArray_DTypeMeta *const signature[],
+        PyArray_DTypeMeta *new_op_dtypes[])
+{
+    Py_INCREF(op_dtypes[0]);
+    new_op_dtypes[0] = op_dtypes[0];
+    new_op_dtypes[1] = NPY_DT_NewRef(&PyArray_IntpDType);
+    new_op_dtypes[2] = NPY_DT_NewRef(&PyArray_IntpDType);
+    new_op_dtypes[3] = NPY_DT_NewRef(&PyArray_IntpDType);
+    Py_INCREF(op_dtypes[0]);
+    new_op_dtypes[4] = op_dtypes[0];
+    return 0;
+}
+
+static NPY_CASTING
+slice_resolve_descriptors(PyArrayMethodObject *self,
+                          PyArray_DTypeMeta *const NPY_UNUSED(dtypes[5]),
+                          PyArray_Descr *const given_descrs[5],
+                          PyArray_Descr *loop_descrs[5],
+                          npy_intp *NPY_UNUSED(view_offset))
+{
+    if (given_descrs[4]) {
+        PyErr_Format(PyExc_TypeError,
+                     "The StringDType '%s' ufunc does not "
+                     "currently support the 'out' keyword",
+                     self->name);
+        return _NPY_ERROR_OCCURRED_IN_CAST;
+    }
+
+    for (int i = 0; i < 4; i++) {
+        Py_INCREF(given_descrs[i]);
+        loop_descrs[i] = given_descrs[i];
+    }
+
+    PyArray_StringDTypeObject *in_descr =
+            (PyArray_StringDTypeObject *)loop_descrs[0];
+    int out_coerce = in_descr->coerce;
+    PyObject *out_na_object = in_descr->na_object;
+    loop_descrs[4] = (PyArray_Descr *)new_stringdtype_instance(out_na_object,
+                                                               out_coerce);
+    if (loop_descrs[4] == NULL) {
+        return _NPY_ERROR_OCCURRED_IN_CAST;
+    }
+
+    return NPY_NO_CASTING;
+}
+
+static int
+slice_strided_loop(PyArrayMethod_Context *context, char *const data[],
+                   npy_intp const dimensions[], npy_intp const strides[],
+                   NpyAuxData *NPY_UNUSED(auxdata))
+{
+    char *iptr = data[0];
+    char *start_ptr = data[1];
+    char *stop_ptr = data[2];
+    char *step_ptr = data[3];
+    char *optr = data[4];
+
+    npy_intp N = dimensions[0];
+
+    npy_string_allocator *allocators[5] = {};
+    NpyString_acquire_allocators(5, context->descriptors, allocators);
+    npy_string_allocator *iallocator = allocators[0];
+    npy_string_allocator *oallocator = allocators[4];
+
+    // Build up an index mapping codepoint indices to locations in the encoded
+    // string.
+    std::vector<unsigned char *> codepoint_offsets;
+
+    while (N--) {
+        // get the slice
+        npy_intp start = *(npy_intp *)start_ptr;
+        npy_intp stop = *(npy_intp *)stop_ptr;
+        npy_intp step = *(npy_intp *)step_ptr;
+
+        npy_static_string is = {0, NULL};
+        const npy_packed_static_string *ips = (npy_packed_static_string *)iptr;
+        npy_static_string os = {0, NULL};
+        npy_packed_static_string *ops = (npy_packed_static_string *)optr;
+        int is_isnull = NpyString_load(iallocator, ips, &is);
+        if (is_isnull == -1) {
+            npy_gil_error(PyExc_MemoryError, "Failed to load string in slice");
+            goto fail;
+        }
+        else if (is_isnull) {
+            npy_gil_error(PyExc_TypeError, "Cannot slice null string");
+            goto fail;
+        }
+
+        // number of codepoints in string
+        size_t num_codepoints = 0;
+        // leaves capacity the same as in previous loop iterations to avoid
+        // heap thrashing
+        codepoint_offsets.clear();
+        {
+            const char *inbuf_ptr = is.buf;
+            const char *inbuf_ptr_end = is.buf + is.size;
+
+            while (inbuf_ptr < inbuf_ptr_end) {
+                num_codepoints++;
+                int num_bytes = num_bytes_for_utf8_character(
+                        ((unsigned char *)inbuf_ptr));
+                codepoint_offsets.push_back((unsigned char *)inbuf_ptr);
+                inbuf_ptr += num_bytes;
+            }
+        }
+
+        // adjust slice to string length in codepoints
+        // and handle negative indices
+        npy_intp slice_length =
+                PySlice_AdjustIndices(num_codepoints, &start, &stop, step);
+
+        if (step == 1) {
+            // step == 1 is the easy case, we can just use memcpy
+            unsigned char *start_bounded = ((size_t)start < num_codepoints
+                                            ? codepoint_offsets[start]
+                                            : (unsigned char *)is.buf + is.size);
+            unsigned char *stop_bounded = ((size_t)stop < num_codepoints
+                                           ? codepoint_offsets[stop]
+                                           : (unsigned char *)is.buf + is.size);
+            npy_intp outsize = stop_bounded - start_bounded;
+            outsize = outsize < 0 ? 0 : outsize;
+
+            if (load_new_string(ops, &os, outsize, oallocator, "slice") < 0) {
+                goto fail;
+            }
+
+            /* explicitly discard const; initializing new buffer */
+            char *buf = (char *)os.buf;
+
+            memcpy(buf, start_bounded, outsize);
+        }
+        else {
+            // handle step != 1
+            // compute outsize
+            npy_intp outsize = 0;
+            for (int i = start; step > 0 ? i < stop : i > stop; i += step) {
+                outsize += num_bytes_for_utf8_character(codepoint_offsets[i]);
+            }
+
+            if (outsize > 0) {
+                if (load_new_string(ops, &os, outsize, oallocator, "slice") < 0) {
+                    goto fail;
+                }
+
+                /* explicitly discard const; initializing new buffer */
+                char *buf = (char *)os.buf;
+
+                for (npy_intp i_idx = start, o_idx = 0; o_idx < slice_length; o_idx++, i_idx += step) {
+                    int num_bytes = num_bytes_for_utf8_character(codepoint_offsets[i_idx]);
+                    memcpy(buf, codepoint_offsets[i_idx], num_bytes);
+                    buf += num_bytes;
+                }
+            }
+        }
+
+        // move to next step
+        iptr += strides[0];
+        start_ptr += strides[1];
+        stop_ptr += strides[2];
+        step_ptr += strides[3];
+        optr += strides[4];
+    }
+
+    NpyString_release_allocators(5, allocators);
+    return 0;
+
+fail:
+    NpyString_release_allocators(5, allocators);
+    return -1;
+}
+
+static int
 string_object_bool_output_promoter(
         PyObject *ufunc, PyArray_DTypeMeta *const op_dtypes[],
         PyArray_DTypeMeta *const signature[],
@@ -2129,6 +2354,17 @@ string_unicode_bool_output_promoter(
     return string_inputs_promoter(
             ufunc, op_dtypes, signature,
             new_op_dtypes, &PyArray_StringDType, &PyArray_BoolDType);
+}
+
+static int
+string_partition_promoter(
+        PyObject *ufunc, PyArray_DTypeMeta *const op_dtypes[],
+        PyArray_DTypeMeta *const signature[],
+        PyArray_DTypeMeta *new_op_dtypes[])
+{
+    return string_inputs_promoter(
+            ufunc, op_dtypes, signature,
+            new_op_dtypes, &PyArray_StringDType, &PyArray_StringDType);
 }
 
 static int
@@ -2396,7 +2632,7 @@ add_object_and_unicode_promoters(PyObject *umath, const char* ufunc_name,
 NPY_NO_EXPORT int
 init_stringdtype_ufuncs(PyObject *umath)
 {
-    static const char *comparison_ufunc_names[6] = {
+    static const char *const comparison_ufunc_names[6] = {
             "equal", "not_equal",
             "less", "less_equal", "greater_equal", "greater",
     };
@@ -2445,7 +2681,7 @@ init_stringdtype_ufuncs(PyObject *umath)
         return -1;
     }
 
-    const char *unary_loop_names[] = {
+    const char *const unary_loop_names[] = {
         "isalpha", "isdecimal", "isdigit", "isnumeric", "isspace",
         "isalnum", "istitle", "isupper", "islower",
     };
@@ -2532,6 +2768,17 @@ init_stringdtype_ufuncs(PyObject *umath)
         return -1;
     }
 
+    PyArray_DTypeMeta *out_strings_promoter_dtypes[] = {
+        &PyArray_UnicodeDType,
+        &PyArray_UnicodeDType,
+        &PyArray_StringDType,
+    };
+
+    if (add_promoter(umath, "add", out_strings_promoter_dtypes, 3,
+                     all_strings_promoter) < 0) {
+        return -1;
+    }
+
     INIT_MULTIPLY(Int64, int64);
     INIT_MULTIPLY(UInt64, uint64);
 
@@ -2565,10 +2812,17 @@ init_stringdtype_ufuncs(PyObject *umath)
         "find", "rfind", "index", "rindex", "count",
     };
 
-    PyArray_DTypeMeta *findlike_promoter_dtypes[] = {
-        &PyArray_StringDType, &PyArray_UnicodeDType,
-        &PyArray_IntAbstractDType, &PyArray_IntAbstractDType,
-        &PyArray_DefaultIntDType,
+    PyArray_DTypeMeta *findlike_promoter_dtypes[2][5] = {
+        {
+            &PyArray_StringDType, &PyArray_UnicodeDType,
+            &PyArray_IntAbstractDType, &PyArray_IntAbstractDType,
+            &PyArray_IntAbstractDType,
+        },
+        {
+            &PyArray_UnicodeDType, &PyArray_StringDType,
+            &PyArray_IntAbstractDType, &PyArray_IntAbstractDType,
+            &PyArray_IntAbstractDType,
+        },
     };
 
     find_like_function *findlike_functions[] = {
@@ -2588,11 +2842,12 @@ init_stringdtype_ufuncs(PyObject *umath)
             return -1;
         }
 
-
-        if (add_promoter(umath, findlike_names[i],
-                         findlike_promoter_dtypes,
-                         5, string_findlike_promoter) < 0) {
-            return -1;
+        for (int j=0; j<2; j++) {
+            if (add_promoter(umath, findlike_names[i],
+                             findlike_promoter_dtypes[j],
+                             5, string_findlike_promoter) < 0) {
+                return -1;
+            }
         }
     }
 
@@ -2606,10 +2861,17 @@ init_stringdtype_ufuncs(PyObject *umath)
         "startswith", "endswith",
     };
 
-    PyArray_DTypeMeta *startswith_endswith_promoter_dtypes[] = {
-        &PyArray_StringDType, &PyArray_UnicodeDType,
-        &PyArray_IntAbstractDType, &PyArray_IntAbstractDType,
-        &PyArray_BoolDType,
+    PyArray_DTypeMeta *startswith_endswith_promoter_dtypes[2][5] = {
+        {
+            &PyArray_StringDType, &PyArray_UnicodeDType,
+            &PyArray_IntAbstractDType, &PyArray_IntAbstractDType,
+            &PyArray_BoolDType,
+        },
+        {
+            &PyArray_UnicodeDType, &PyArray_StringDType,
+            &PyArray_IntAbstractDType, &PyArray_IntAbstractDType,
+            &PyArray_BoolDType,
+        },
     };
 
     static STARTPOSITION startswith_endswith_startposition[] = {
@@ -2626,11 +2888,12 @@ init_stringdtype_ufuncs(PyObject *umath)
             return -1;
         }
 
-
-        if (add_promoter(umath, startswith_endswith_names[i],
-                         startswith_endswith_promoter_dtypes,
-                         5, string_startswith_endswith_promoter) < 0) {
-            return -1;
+        for (int j=0; j<2; j++) {
+            if (add_promoter(umath, startswith_endswith_names[i],
+                             startswith_endswith_promoter_dtypes[j],
+                             5, string_startswith_endswith_promoter) < 0) {
+                return -1;
+            }
         }
     }
 
@@ -2638,7 +2901,7 @@ init_stringdtype_ufuncs(PyObject *umath)
         &PyArray_StringDType, &PyArray_StringDType
     };
 
-    const char *strip_whitespace_names[] = {
+    const char *const strip_whitespace_names[] = {
         "_lstrip_whitespace", "_rstrip_whitespace", "_strip_whitespace",
     };
 
@@ -2662,7 +2925,7 @@ init_stringdtype_ufuncs(PyObject *umath)
         &PyArray_StringDType, &PyArray_StringDType, &PyArray_StringDType
     };
 
-    const char *strip_chars_names[] = {
+    const char *const strip_chars_names[] = {
         "_lstrip_chars", "_rstrip_chars", "_strip_chars",
     };
 
@@ -2702,24 +2965,38 @@ init_stringdtype_ufuncs(PyObject *umath)
         return -1;
     }
 
-    PyArray_DTypeMeta *replace_promoter_pyint_dtypes[] = {
-        &PyArray_StringDType, &PyArray_UnicodeDType, &PyArray_UnicodeDType,
-        &PyArray_IntAbstractDType, &PyArray_StringDType,
+    PyArray_DTypeMeta *replace_promoter_unicode_dtypes[6][5] = {
+        {
+            &PyArray_StringDType, &PyArray_UnicodeDType, &PyArray_UnicodeDType,
+            &PyArray_IntAbstractDType, &PyArray_StringDType,
+        },
+        {
+            &PyArray_UnicodeDType, &PyArray_StringDType, &PyArray_UnicodeDType,
+            &PyArray_IntAbstractDType, &PyArray_StringDType,
+        },
+        {
+            &PyArray_UnicodeDType, &PyArray_UnicodeDType, &PyArray_StringDType,
+            &PyArray_IntAbstractDType, &PyArray_StringDType,
+        },
+        {
+            &PyArray_StringDType, &PyArray_StringDType, &PyArray_UnicodeDType,
+            &PyArray_IntAbstractDType, &PyArray_StringDType,
+        },
+        {
+            &PyArray_StringDType, &PyArray_UnicodeDType, &PyArray_StringDType,
+            &PyArray_IntAbstractDType, &PyArray_StringDType,
+        },
+        {
+            &PyArray_UnicodeDType, &PyArray_StringDType, &PyArray_StringDType,
+            &PyArray_IntAbstractDType, &PyArray_StringDType,
+        },
     };
 
-    if (add_promoter(umath, "_replace", replace_promoter_pyint_dtypes, 5,
-                     string_replace_promoter) < 0) {
-        return -1;
-    }
-
-    PyArray_DTypeMeta *replace_promoter_int64_dtypes[] = {
-        &PyArray_StringDType, &PyArray_UnicodeDType, &PyArray_UnicodeDType,
-        &PyArray_Int64DType, &PyArray_StringDType,
-    };
-
-    if (add_promoter(umath, "_replace", replace_promoter_int64_dtypes, 5,
-                     string_replace_promoter) < 0) {
-        return -1;
+    for (int j=0; j<6; j++) {
+        if (add_promoter(umath, "_replace", replace_promoter_unicode_dtypes[j], 5,
+                         string_replace_promoter) < 0) {
+            return -1;
+        }
     }
 
     PyArray_DTypeMeta *expandtabs_dtypes[] = {
@@ -2737,9 +3014,9 @@ init_stringdtype_ufuncs(PyObject *umath)
     }
 
     PyArray_DTypeMeta *expandtabs_promoter_dtypes[] = {
-        &PyArray_StringDType,
-        (PyArray_DTypeMeta *)Py_None,
-        &PyArray_StringDType
+            &PyArray_StringDType,
+            &PyArray_IntAbstractDType,
+            &PyArray_StringDType
     };
 
     if (add_promoter(umath, "_expandtabs", expandtabs_promoter_dtypes,
@@ -2771,30 +3048,33 @@ init_stringdtype_ufuncs(PyObject *umath)
             return -1;
         }
 
-        PyArray_DTypeMeta *int_promoter_dtypes[] = {
-            &PyArray_StringDType,
-            (PyArray_DTypeMeta *)Py_None,
-            &PyArray_StringDType,
-            &PyArray_StringDType,
+        PyArray_DTypeMeta *promoter_dtypes[3][4] = {
+            {
+                &PyArray_StringDType,
+                &PyArray_IntAbstractDType,
+                &PyArray_StringDType,
+                &PyArray_StringDType,
+            },
+            {
+                &PyArray_StringDType,
+                &PyArray_IntAbstractDType,
+                &PyArray_UnicodeDType,
+                &PyArray_StringDType,
+            },
+            {
+                &PyArray_UnicodeDType,
+                &PyArray_IntAbstractDType,
+                &PyArray_StringDType,
+                &PyArray_StringDType,
+            },
         };
 
-        if (add_promoter(umath, center_ljust_rjust_names[i],
-                         int_promoter_dtypes, 4,
-                         string_multiply_promoter) < 0) {
-            return -1;
-        }
-
-        PyArray_DTypeMeta *unicode_promoter_dtypes[] = {
-            &PyArray_StringDType,
-            (PyArray_DTypeMeta *)Py_None,
-            &PyArray_UnicodeDType,
-            &PyArray_StringDType,
-        };
-
-        if (add_promoter(umath, center_ljust_rjust_names[i],
-                         unicode_promoter_dtypes, 4,
-                         string_multiply_promoter) < 0) {
-            return -1;
+        for (int j=0; j<3; j++) {
+            if (add_promoter(umath, center_ljust_rjust_names[i],
+                             promoter_dtypes[j], 4,
+                             string_center_ljust_rjust_promoter) < 0) {
+                return -1;
+            }
         }
     }
 
@@ -2810,13 +3090,13 @@ init_stringdtype_ufuncs(PyObject *umath)
         return -1;
     }
 
-    PyArray_DTypeMeta *int_promoter_dtypes[] = {
+    PyArray_DTypeMeta *zfill_promoter_dtypes[] = {
             &PyArray_StringDType,
-            (PyArray_DTypeMeta *)Py_None,
+            &PyArray_IntAbstractDType,
             &PyArray_StringDType,
     };
 
-    if (add_promoter(umath, "_zfill", int_promoter_dtypes, 3,
+    if (add_promoter(umath, "_zfill", zfill_promoter_dtypes, 3,
                      string_multiply_promoter) < 0) {
         return -1;
     }
@@ -2829,7 +3109,7 @@ init_stringdtype_ufuncs(PyObject *umath)
         &PyArray_StringDType
     };
 
-    const char *partition_names[] = {"_partition", "_rpartition"};
+    const char *const partition_names[] = {"_partition", "_rpartition"};
 
     static STARTPOSITION partition_startpositions[] = {
         STARTPOSITION::FRONT, STARTPOSITION::BACK
@@ -2842,6 +3122,54 @@ init_stringdtype_ufuncs(PyObject *umath)
                        (NPY_ARRAYMETHOD_FLAGS) 0, &partition_startpositions[i]) < 0) {
             return -1;
         }
+    }
+
+    PyArray_DTypeMeta *partition_promoter_dtypes[2][5] = {
+        {
+            &PyArray_StringDType, &PyArray_UnicodeDType,
+            &PyArray_StringDType, &PyArray_StringDType, &PyArray_StringDType,
+        },
+        {
+            &PyArray_UnicodeDType, &PyArray_StringDType,
+            &PyArray_StringDType, &PyArray_StringDType, &PyArray_StringDType,
+        },
+    };
+
+    for (int i=0; i<2; i++) {
+        for (int j=0; j<2; j++) {
+            if (add_promoter(umath, partition_names[i],
+                             partition_promoter_dtypes[j], 5,
+                             string_partition_promoter) < 0) {
+                return -1;
+            }
+        }
+    }
+
+    PyArray_DTypeMeta *slice_dtypes[] = {
+        &PyArray_StringDType,
+        &PyArray_IntpDType,
+        &PyArray_IntpDType,
+        &PyArray_IntpDType,
+        &PyArray_StringDType,
+    };
+
+    if (init_ufunc(umath, "_slice", slice_dtypes, slice_resolve_descriptors,
+                   slice_strided_loop, 4, 1, NPY_NO_CASTING,
+                   (NPY_ARRAYMETHOD_FLAGS) 0, NULL) < 0) {
+        return -1;
+    }
+
+    PyArray_DTypeMeta *slice_promoter_dtypes[] = {
+        &PyArray_StringDType,
+        &PyArray_IntAbstractDType,
+        &PyArray_IntAbstractDType,
+        &PyArray_IntAbstractDType,
+        &PyArray_StringDType,
+    };
+
+    if (add_promoter(umath, "_slice", slice_promoter_dtypes, 5,
+                     slice_promoter) < 0) {
+        return -1;
     }
 
     return 0;

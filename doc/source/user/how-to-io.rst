@@ -206,7 +206,7 @@ Human-readable
 
 :func:`numpy.save` and :func:`numpy.savez` create binary files. To **write a
 human-readable file**, use :func:`numpy.savetxt`. The array can only be 1- or
-2-dimensional, and there's no ` savetxtz` for multiple files.
+2-dimensional, and there's no ``savetxtz`` for multiple files.
 
 Large arrays
 ------------
@@ -343,6 +343,6 @@ storage.
 
    >>> import os
    >>> # list all files created in testsetup. If needed there are
-   >>> # convenienes in e.g. astroquery to do this more automatically
+   >>> # conveniences in e.g. astroquery to do this more automatically
    >>> for filename in ['csv.txt', 'fixedwidth.txt', 'nan.txt', 'skip.txt', 'tabs.txt']:
    ...     os.remove(filename)

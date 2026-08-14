@@ -185,7 +185,7 @@ static char *msg = "future versions will not create a writeable "
             PyArrayFlagsObject *self, void *NPY_UNUSED(ignored)) \
     { \
         if (self->flags & NPY_ARRAY_WARN_ON_WRITE) { \
-            if (PyErr_Warn(PyExc_FutureWarning, msg) < 0) {\
+            if (PyErr_WarnEx(PyExc_FutureWarning, msg, 1) < 0) {\
                 return NULL; \
             } \
         }\
@@ -586,6 +586,9 @@ arrayflags_setitem(PyArrayFlagsObject *self, PyObject *ind, PyObject *item)
     if (PyUnicode_Check(ind)) {
         PyObject *tmp_str;
         tmp_str = PyUnicode_AsASCIIString(ind);
+        if (tmp_str == NULL) {
+            goto fail;
+        }
         key = PyBytes_AS_STRING(tmp_str);
         n = PyBytes_GET_SIZE(tmp_str);
         if (n > 16) n = 16;
